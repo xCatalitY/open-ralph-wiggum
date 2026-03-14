@@ -214,6 +214,7 @@ Options:
   --no-plugins             Disable non-auth OpenCode plugins for this run (opencode only)
   --no-commit              Don't auto-commit after iterations
   --allow-all              Auto-approve all tool permissions (default: on)
+  --yolo                   Codex only: bypass approvals and sandbox (dangerous)
   --no-allow-all           Require interactive permission prompts
   --config PATH            Use custom agent config file
   --init-config [PATH]     Write default agent config to PATH and exit
@@ -650,6 +651,11 @@ ralph "Generate unit tests for all utility functions" \
   --model gpt-5-codex \
   --max-iterations 10
 ```
+
+**Notes:**
+- `--allow-all` maps to `codex exec --full-auto`
+- `--yolo` maps to `codex exec --yolo`; this is more permissive than `--allow-all`
+- Ralph runs Codex from the current project root and does not override Codex config discovery, so Codex can still use `~/.codex/config.toml` and project-scoped `.codex/config.toml`
 
 ### OpenCode
 

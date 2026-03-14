@@ -33,7 +33,12 @@ type AgentType = (typeof AGENT_TYPES)[number];
 
 type AgentEnvOptions = { filterPlugins?: boolean; allowAllPermissions?: boolean };
 
-type AgentBuildArgsOptions = { allowAllPermissions?: boolean; extraFlags?: string[]; streamOutput?: boolean };
+type AgentBuildArgsOptions = {
+  allowAllPermissions?: boolean;
+  useYolo?: boolean;
+  extraFlags?: string[];
+  streamOutput?: boolean;
+};
 
 interface AgentConfig {
   type: AgentType;
@@ -110,7 +115,11 @@ const ARGS_TEMPLATES: Record<string, (prompt: string, model: string, options?: A
   "codex": (prompt, model, options) => {
     const cmdArgs = ["exec"];
     if (model) cmdArgs.push("--model", model);
-    if (options?.allowAllPermissions) cmdArgs.push("--full-auto");
+    if (options?.useYolo) {
+      cmdArgs.push("--yolo");
+    } else if (options?.allowAllPermissions) {
+      cmdArgs.push("--full-auto");
+    }
     if (options?.extraFlags?.length) cmdArgs.push(...options.extraFlags);
     cmdArgs.push(prompt);
     return cmdArgs;
@@ -125,7 +134,11 @@ const ARGS_TEMPLATES: Record<string, (prompt: string, model: string, options?: A
   "default": (prompt, model, options) => {
     const cmdArgs: string[] = [];
     if (model) cmdArgs.push("--model", model);
-    if (options?.allowAllPermissions) cmdArgs.push("--full-auto");
+    if (options?.useYolo) {
+      cmdArgs.push("--yolo");
+    } else if (options?.allowAllPermissions) {
+      cmdArgs.push("--full-auto");
+    }
     if (options?.extraFlags?.length) cmdArgs.push(...options.extraFlags);
     cmdArgs.push(prompt);
     return cmdArgs;
@@ -320,6 +333,7 @@ Options:
   --no-plugins        Disable non-auth OpenCode plugins for this run (opencode only)
   --no-commit         Don't auto-commit after each iteration
   --allow-all         Auto-approve all tool permissions (default: on)
+  --yolo              Codex only: bypass approvals and sandbox (dangerous)
   --no-allow-all      Require interactive permission prompts
   --config PATH       Use custom agent config file
   --init-config [PATH]  Write default agent config to PATH
@@ -835,6 +849,7 @@ let rotation: string[] | null = null;
 let autoCommit = true;
 let disablePlugins = false;
 let allowAllPermissions = true;
+let useYolo = false;
 let promptFile = "";
 let promptTemplatePath = ""; // Custom prompt template file
 let streamOutput = true;
@@ -966,8 +981,13 @@ for (let i = 0; i < args.length; i++) {
     disablePlugins = true;
   } else if (arg === "--allow-all") {
     allowAllPermissions = true;
+    useYolo = false;
+  } else if (arg === "--yolo") {
+    allowAllPermissions = true;
+    useYolo = true;
   } else if (arg === "--no-allow-all") {
     allowAllPermissions = false;
+    useYolo = false;
   } else if (arg === "--questions") {
     handleQuestions = true;
   } else if (arg === "--no-questions") {
@@ -1912,6 +1932,16 @@ async function runRalphLoop(): Promise<void> {
   if (disablePlugins && agentConfig.type === "copilot") {
     console.warn("Warning: --no-plugins has no effect with Copilot CLI agent");
   }
+  if (useYolo) {
+    const yoloTargets = rotationActive
+      ? new Set(runtimeRotation!.map(entry => entry.split(":")[0]))
+      : new Set<AgentType>([initialAgentType]);
+    if (!yoloTargets.has("codex")) {
+      console.warn("Warning: --yolo only maps specially for Codex. Other agents will use their normal auto-approve mode.");
+    } else if (yoloTargets.size > 1) {
+      console.warn("Warning: --yolo enables Codex's dangerous no-sandbox mode only for Codex iterations. Other agents keep their normal auto-approve mode.");
+    }
+  }
 
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
@@ -1981,7 +2011,14 @@ async function runRalphLoop(): Promise<void> {
   if (disablePlugins && agentConfig.type === "opencode") {
     console.log("OpenCode plugins: non-auth plugins disabled");
   }
-  if (allowAllPermissions) console.log("Permissions: auto-approve all tools");
+  if (useYolo && (rotationActive || agentConfig.type === "codex")) {
+    const label = rotationActive
+      ? "Permissions: Codex iterations use YOLO (no approvals, no sandbox)"
+      : "Permissions: Codex YOLO (no approvals, no sandbox)";
+    console.log(label);
+  } else if (allowAllPermissions) {
+    console.log("Permissions: auto-approve all tools");
+  }
   console.log("");
   console.log("Starting loop... (Ctrl+C to stop)");
   console.log("═".repeat(68));
@@ -2083,6 +2120,7 @@ async function runRalphLoop(): Promise<void> {
       // Build command arguments (permission flags are handled inside buildArgs)
       const cmdArgs = agentConfig.buildArgs(fullPrompt, currentModel, {
         allowAllPermissions,
+        useYolo: useYolo && currentAgent === "codex",
         extraFlags: extraAgentFlags,
         streamOutput,
       });
